@@ -88,7 +88,6 @@ model = BERTClassifier(num_classes=len(encoder.classes_)).to(device)
 optimizer = AdamW(model.parameters(), lr=2e-5)
 criterion = nn.CrossEntropyLoss()
 
-torch.cuda.is_available(), torch.cuda.get_device_name(0)
 
 train_losses = []
 val_losses = []
