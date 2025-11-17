@@ -1,27 +1,55 @@
 import torch
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 url = "https://docs.google.com/spreadsheets/d/17aHYyRNfbmde8bVOR_HX_BmNUEdkygPuaGO4lJj26jg/export?format=csv"
 df = pd.read_csv(url)
 
-classes = ["onca", "fake news", "caseiro"]
+classes = ["onca", "caseiro", "fake news", "ironia", "notícia"]
 
 df = df[["comment_text"] + classes].copy()
 df = df.dropna(subset=["comment_text"])
 
 df = df.drop_duplicates(subset=["comment_text"])
 
-def combine_labels(row):
-    for coluna in classes:
-        if row[coluna] != "não":
-            return row[coluna]
+def normalizar_str(x):
+    if pd.isna(x):
+        return ""
+    return str(x).strip().lower()
+
+for col in classes:
+    df[col] = df[col].apply(normalizar_str)
+
+classes_escolhidas = ["onca", "caseiro", "fake news"]
+
+valid_sents = {"positivo", "negativo", "neutro"}
+
+def get_sentiment_label(row):
+    for col in classes_escolhidas:
+        if row[col] in valid_sents:
+            return row[col]
     return None
 
-df["label"] = df.apply(combine_labels, axis=1)
-df = df.dropna(subset=["label"])
+df["label"] = df.apply(get_sentiment_label, axis=1)
+
+df = df.dropna(subset=["label"]).reset_index(drop=True)
+
+class_map = {
+    "positivo": 2,
+    "neutro": 1,
+    "negativo": 0
+}
+
+df["label_id"] = df["label"].map(class_map)
+
+class_names = ["negativo", "neutro", "positivo"]
+num_classes = len(class_names)
+
+print(f"Distribuição das classes de sentimento:")
+print(df["label"].value_counts())
+print("\n")
 
 from sklearn.preprocessing import LabelEncoder
 
@@ -78,7 +106,7 @@ class BERTClassifier(nn.Module):
 
     def forward(self, input_ids, attention_mask):
         outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
-        cls_embedding = outputs.last_hidden_state[:, 0, :] 
+        cls_embedding = outputs.last_hidden_state[:, 0, :]
         x = self.dropout(cls_embedding)
         return self.fc(x)
 
@@ -87,7 +115,6 @@ model = BERTClassifier(num_classes=len(encoder.classes_)).to(device)
 
 optimizer = AdamW(model.parameters(), lr=2e-5)
 criterion = nn.CrossEntropyLoss()
-
 
 train_losses = []
 val_losses = []
@@ -117,6 +144,7 @@ for epoch in range(10):
 
     train_acc = correct / total
     train_losses.append(total_loss / len(train_loader))
+
 
     model.eval()
     val_loss = 0
@@ -173,6 +201,8 @@ from sklearn.metrics import classification_report
 print(classification_report(y_true, y_pred, target_names=encoder.classes_))
 
 
+Erros
+
 test_df = test_df.reset_index(drop=True)
 
 for i in range(len(y_true)):
@@ -181,3 +211,28 @@ for i in range(len(y_true)):
         print("REAL:", encoder.classes_[y_true[i]])
         print("PREVISTO:", encoder.classes_[y_pred[i]])
         print("-"*80)
+
+def predict(text):
+    model.eval()
+    model.to(device)
+
+    with torch.no_grad():
+        encoded = tokenizer(
+            text,
+            padding='max_length',
+            truncation=True,
+            max_length=128,
+            return_tensors='pt'
+        ).to(device)
+
+        outputs = model(encoded['input_ids'], encoded['attention_mask'])
+        logits = outputs
+        pred_id = torch.argmax(logits, dim=1).item()
+
+    return encoder.inverse_transform([pred_id])[0]
+
+print(predict("Estão entrando no lugar das onças, que raiva"))
+
+print(predict("duas onças enormes, que perda lastimável"))
+
+print(predict("Excelente vídeo, parabéns!!"))
